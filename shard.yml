@@ -4,9 +4,9 @@ version: 0.1.0
 authors:
   - Jamie Gaskins <jgaskins@hey.com>
 
-crystal: '>= 1.19.1'
-
-license: MIT
+targets:
+  stitch-migration:
+    main: src/migrations.cr
 
 dependencies:
   db:
@@ -16,3 +16,12 @@ dependencies:
 development_dependencies:
   sqlite3:
     github: crystal-lang/crystal-sqlite3
+
+scripts:
+  postinstall: shards build stitch-migration
+executables:
+  - stitch-migration
+
+crystal: '>= 1.19.1'
+
+license: MIT
