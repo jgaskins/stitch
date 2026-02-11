@@ -1,193 +1,107 @@
 require "option_parser"
+require "dotenv"
+Dotenv.load?
 
-require "./stitch"
-require "./migration"
+migrations = MigrationRunner.new(DB.open(ENV["DATABASE_URL"]))
+
+OptionParser.parse do |parser|
+  parser.on "run", "Run pending migrations" do
+    migrations.command = :run
+  end
+
+  parser.on "rollback", "Roll back the most recent migration" do
+    migrations.command = :rollback
+  end
+
+  parser.on "redo", "Redo the most recent migration" do
+    migrations.command = :redo
+  end
+end
+
+migrations.call
 
 module Stitch
-  module Migrations
-    MigrationLog = ::Log.for("migrations", level: :info)
+  class MigrationRunner
+    getter db : DB::Database
+    property command : Command = :unknown
 
-    TIME_FORMAT = Time::Format::ISO_8601_DATE_TIME
-
-    NAME_MAP       = {} of String => Migration
-    ALL_MIGRATIONS = Dir["db/migrations/**/*.sql"].map do |path|
-      filename = File.basename File.dirname(path)
-      timestamp, name = filename.split "-"
-      time = Time.parse_utc(timestamp, "%Y_%m_%d_%H_%M_%S_%9N")
-      migration = NAME_MAP[name] ||= Migration.new(name, time)
-
-      if path.ends_with? "up.sql"
-        migration.up = File.read(path)
-      elsif path.ends_with? "down.sql"
-        migration.down = File.read(path)
-      else
-        raise "Migration files must be named up.sql or down.sql"
-      end
-
-      SchemaMigration.new(name, time)
-    end.uniq
-
-    ::Log.setup do |c|
-      c.bind "migrations", :info, Log::IOBackend.new(
-        formatter: Log::Formatter.new { |entry, io|
-          io << "\e[1m"
-          io << entry.message
-          io << "\e[0m"
-        },
-      )
-      c.bind "sql", :info, Log::IOBackend.new(
-        formatter: Log::Formatter.new { |entry, io|
-          message = entry.message.rstrip
-          indent = message
-            .each_line
-            .min_by { |line| line.index(/\S/) || 0 }
-            .index(/\S/)
-
-          message.each_line(chomp: false) do |line|
-            io << line.sub(/\A\s{#{indent}}/, "")
-          end
-        },
-      )
+    def initialize(@db = Config.db)
+      db.exec <<-SQL
+      CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)
+    SQL
     end
 
-    def self.call(args : Array(String))
-      operation = -> { }
-
-      OptionParser.parse args.dup do |parser|
-        selected_migration = nil
-        parser.on "-n NAME", "--name=NAME", "Specify a migration name to perform the operation on (not the filename)" do |name|
-          selected_migration = ALL_MIGRATIONS.find { |m| m.name == name }
-        end
-
-        parser.on "rollback", "Rollback the specified migration (default: latest)" do
-          operation = -> { rollback selected_migration }
-        end
-
-        parser.on "redo", "Redo (rollback+run) the specified migration (default: latest)" do
-          operation = -> { redo selected_migration }
-        end
-
-        parser.on "run", "Run the specified migration (default: all incomplete)" do
-          operation = -> { run selected_migration }
-        end
-
-        parser.on "g", "Generate a migration with the specified name" do
-          name = ""
-          parser.unknown_args { |args| name = args.first }
-          operation = -> { SQLGenerator.call name }
-        end
-      end
-
-      operation.call
-    end
-
-    def self.run(migration : Nil)
-      ensure_migration_table_exists
-      all_migrations = ALL_MIGRATIONS.sort_by(&.added_at)
-
-      (all_migrations - completed_migrations).each do |migration|
-        run migration
+    def call
+      case command
+      in .run?      then run
+      in .rollback? then rollback
+      in .redo?     then redo
+      in .unknown?  then unknown
       end
     end
 
-    def self.run(migration : SchemaMigration)
-      MigrationLog.info { "Running #{migration.name}" }
-      measurement = Benchmark.measure do
-        NAME_MAP[migration.name].up
-        CONFIG.write_db.exec <<-SQL, migration.name, migration.added_at.to_s
-          INSERT INTO schema_migrations (name, added_at)
-          VALUES (?, ?)
-        SQL
-      end
-      MigrationLog.info { "#{migration.name}: #{measurement.real.humanize}s (#{measurement.total.humanize}s CPU)" }
+    def redo
+      rollback
+      run
     end
 
-    def self.rollback(migration : Nil)
-      if migration = completed_migrations.last?
-        rollback migration
-      else
-        MigrationLog.warn { "No migration to roll back" }
-        nil
-      end
-    end
+    def run
+      count = 0
+      Dir["db/migrations/*"].each do |dir|
+        migration = dir.lchop("db/migrations/")
+        next if completed_migrations.includes? migration
 
-    def self.rollback(migration : SchemaMigration)
-      ensure_migration_table_exists
-      MigrationLog.info { "Rolling back #{migration.name}" }
-      measurement = Benchmark.measure do
-        NAME_MAP[migration.name].down
-        CONFIG.write_db.exec <<-SQL, migration.name, migration.added_at.to_s
-          DELETE FROM schema_migrations
-          WHERE name = ?
-          AND added_at = ?
-        SQL
+        puts "-- Running #{migration}"
+        sql = File.read("#{dir}/up.sql")
+        puts sql
+        db.exec sql
+        puts "-- Done"
+        db.exec "INSERT INTO schema_migrations (name) VALUES (?)", migration
+        puts
+        count += 1
       end
-      MigrationLog.info { "#{migration.name}: #{measurement.real.humanize}s" }
-      migration
-    end
 
-    def self.redo(migration : Nil)
-      if migration = rollback(nil)
-        run migration
+      if count == 0
+        puts "Migrations up to date."
       end
     end
 
-    def self.redo(migration : SchemaMigration)
-      rollback migration
-      run migration
-    end
-
-    def self.completed_migrations
-      CONFIG.write_db.query_all <<-SQL, as: SchemaMigration
-        SELECT name, added_at
-        FROM schema_migrations
-        ORDER BY added_at
-      SQL
-    end
-
-    def self.ensure_migration_table_exists
-      CONFIG.write_db.exec <<-SQL
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-          name TEXT UNIQUE NOT NULL,
-          added_at TEXT UNIQUE NOT NULL
-        )
-      SQL
-    end
-
-    class SQLGenerator
-      def self.call(*args, **kwargs)
-        new.call(*args, **kwargs)
+    def rollback
+      unless migration = completed_migrations.to_a.sort.last?
+        puts "No migration to roll back"
+        exit 1
       end
+      dir = "db/migrations/#{migration}"
 
-      def call(name : String)
-        puts "Generating #{name}..."
-        dir = "db/migrations/#{Time.utc.to_s("%Y_%m_%d_%H_%M_%S_%9N")}-#{name}"
-        Dir.mkdir_p dir
-        File.write "#{dir}/up.sql", <<-SQL
-        CREATE TABLE foo(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          -- other attributes can go here
-          created_at TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-        SQL
+      puts "-- Rolling back #{migration}"
+      sql = File.read("#{dir}/down.sql")
+      puts sql
+      db.exec sql
+      puts "-- Done"
+      db.exec "DELETE FROM schema_migrations WHERE name = ?", migration
+      @completed_migrations = nil
+    end
 
-        File.write "#{dir}/down.sql", "DROP TABLE foo"
+    def unknown
+      puts "Must supply a command:"
+      Command.each do |value|
+        puts "- #{value.to_s.underscore}" unless value.unknown?
       end
     end
 
-    struct SchemaMigration
-      include DB::Serializable
+    getter completed_migrations : Set(String) do
+      db.query_all(<<-SQL, as: String).to_set
+      SELECT name
+      FROM schema_migrations
+      ORDER BY name
+    SQL
+    end
 
-      property name : String
-      property added_at : String
-
-      def initialize(@name, added_at : Time)
-        @added_at = added_at.to_s
-      end
-
-      def initialize(@name, @added_at : String)
-      end
+    enum Command
+      Run
+      Rollback
+      Redo
+      Unknown
     end
   end
 end
