@@ -35,6 +35,14 @@ TEST_DB.exec <<-SQL
   )
 SQL
 
+TEST_DB.exec <<-SQL
+  CREATE TABLE articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    published BOOLEAN NOT NULL DEFAULT 0
+  )
+SQL
+
 struct Post
   include DB::Serializable
 
@@ -59,6 +67,34 @@ struct Tag
 
   getter id : Int64
   getter name : String
+end
+
+struct Article
+  include DB::Serializable
+
+  getter id : Int64
+  getter title : String
+  getter published : Bool
+end
+
+struct ArticleQuery < Stitch::QueryBuilder(Article)
+  table "articles"
+
+  def create(title : String, published : Bool = false)
+    insert(title: title, published: published)
+  end
+
+  def create!(title : String, published : Bool = false) : Bool
+    insert!(title: title, published: published)
+  end
+
+  def published_articles
+    where(published: true)
+  end
+
+  def unpublished_articles
+    where(published: false)
+  end
 end
 
 struct PostQuery < Stitch::QueryBuilder(Post)
@@ -215,4 +251,5 @@ def clear_tables
   TEST_DB.exec "DELETE FROM comments"
   TEST_DB.exec "DELETE FROM posts"
   TEST_DB.exec "DELETE FROM tags"
+  TEST_DB.exec "DELETE FROM articles"
 end

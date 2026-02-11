@@ -408,6 +408,31 @@ describe Stitch do
     end
   end
 
+  describe "Bool values in models" do
+    it "inserts and reads a false Bool value" do
+      article = ArticleQuery.new.create("Draft")
+      article.published.should be_false
+    end
+
+    it "inserts and reads a true Bool value" do
+      article = ArticleQuery.new.create("Live", published: true)
+      article.published.should be_true
+    end
+
+    it "filters by Bool value" do
+      ArticleQuery.new.create("Draft", published: false)
+      ArticleQuery.new.create("Live", published: true)
+
+      published = ArticleQuery.new.published_articles.to_a
+      published.size.should eq 1
+      published.first.title.should eq "Live"
+
+      unpublished = ArticleQuery.new.unpublished_articles.to_a
+      unpublished.size.should eq 1
+      unpublished.first.title.should eq "Draft"
+    end
+  end
+
   describe "Enumerable integration" do
     it "supports to_a" do
       PostQuery.new.create("A", "body")
