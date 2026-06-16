@@ -1,4 +1,5 @@
 require "option_parser"
+require "db"
 require "dotenv"
 Dotenv.load?
 
