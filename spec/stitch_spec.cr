@@ -261,6 +261,17 @@ describe Stitch do
         results = CommentQuery.new.with_left_join_on_posts.to_a
         results.size.should eq 1
       end
+
+      it "supports returning both sides of a join" do
+        post = PostQuery.new.create("Post", "body")
+        comment = CommentQuery.new.create(post.id, "Comment", "Bob")
+
+        results = CommentQuery.new
+          .for_post(post.id)
+          .include_post
+          .to_a
+        results.should eq [{comment, post}]
+      end
     end
 
     describe "on_conflict / do_nothing" do

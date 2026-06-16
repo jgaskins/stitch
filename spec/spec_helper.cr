@@ -44,7 +44,7 @@ TEST_DB.exec <<-SQL
 SQL
 
 struct Post
-  include DB::Serializable
+  include Stitch::Model
 
   getter id : Int64
   getter title : String
@@ -54,7 +54,7 @@ struct Post
 end
 
 struct Comment
-  include DB::Serializable
+  include Stitch::Model
 
   getter id : Int64
   getter post_id : Int64

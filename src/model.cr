@@ -57,7 +57,7 @@ module Stitch
           %found{name} = false
         {% end %}
 
-        rs.each_column do |col_name|
+        rs.each_column_from_last do |col_name|
           case col_name
             {% for name, value in properties %}
               when {{value[:key]}}
@@ -74,6 +74,11 @@ module Stitch
                 rescue exc
                   ::raise ::DB::MappingException.new(exc.message, self.class.to_s, {{name.stringify}}, cause: exc)
                 end
+
+                {% for name_for_check, __value in properties %}
+                  next unless %found{name_for_check}
+                {% end %}
+                break
             {% end %}
           else
             rs.read
@@ -113,5 +118,24 @@ module Stitch
       protected def on_unknown_db_column(col_name)
       end
     end
+  end
+end
+
+
+class SQLite3::ResultSet
+  # We have to monkeypatch this to support the modification in Stitch::Model
+  # above
+  def each_column_from_last(&)
+    (@column_index...column_count).each do |i|
+      yield column_name(i)
+    end
+  end
+
+  def read(type : DB::Serializable.class)
+    type.new(self)
+  end
+
+  def read(type : Stitch::Model.class)
+    type.new(self)
   end
 end
