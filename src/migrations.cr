@@ -3,7 +3,7 @@ require "db"
 require "dotenv"
 Dotenv.load?
 
-migrations = MigrationRunner.new(DB.open(ENV["DATABASE_URL"]))
+migrations = Stitch::MigrationRunner.new(DB.open(ENV["DATABASE_URL"]))
 
 OptionParser.parse do |parser|
   parser.on "run", "Run pending migrations" do
