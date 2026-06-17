@@ -188,6 +188,13 @@ struct CommentQuery < Stitch::QueryBuilder(Comment)
     where(author: author)
   end
 
+  def include_post
+    posts = PostQuery.new
+    self
+      .with_inner_join_on_posts
+      .fetch("#{select_columns}, #{posts.select_columns("p")}", as: {Comment, Post})
+  end
+
   def with_inner_join_on_posts
     inner_join("posts", as: "p", on: "comments.post_id = p.id")
   end

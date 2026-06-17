@@ -65,6 +65,41 @@ module Stitch
         delegate: self
     end
 
+    # Set operations are defined here rather than forwarded to `@delegate` so
+    # that the compound query reflects *this* query's projected columns and
+    # result type (`T`) rather than the delegate's. The right-hand side is
+    # re-projected through the same `SELECT` list so both halves line up.
+    def |(other : QueryBuilder) : CompoundQuery(T)
+      CompoundQuery(T).new(self, "UNION", project(other), connection(CONFIG.read_db))
+    end
+
+    def &(other : QueryBuilder) : CompoundQuery(T)
+      CompoundQuery(T).new(self, "INTERSECT", project(other), connection(CONFIG.read_db))
+    end
+
+    def -(other : QueryBuilder) : CompoundQuery(T)
+      CompoundQuery(T).new(self, "EXCEPT", project(other), connection(CONFIG.read_db))
+    end
+
+    # Re-project `other` through this query's `SELECT` list so it produces the
+    # same columns (and result type `T`) as the receiver, making it suitable as
+    # the other half of a set operation.
+    protected def project(other : QueryBuilder)
+      DynamicQuery(T, typeof(other)).new(
+        select: @select_columns,
+        distinct: other.distinct?,
+        from: other.sql_table_name,
+        join: other.join_clause,
+        where: other.where_clause,
+        order_by: other.order_by_clause,
+        offset: other.offset_clause,
+        limit: other.limit_clause,
+        args: other.args,
+        transaction: other.transaction,
+        delegate: other,
+      )
+    end
+
     macro method_missing(call)
       @delegate.distinct = @distinct
       @delegate.join_clause = @join_clause

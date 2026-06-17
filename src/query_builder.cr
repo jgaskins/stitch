@@ -161,7 +161,7 @@ module Stitch
     end
 
     def &(other : self) : CompoundQuery
-      CompoundQuery.new(self, "INTERSECTION", other, connection(CONFIG.read_db))
+      CompoundQuery.new(self, "INTERSECT", other, connection(CONFIG.read_db))
     end
 
     def -(other : self) : CompoundQuery
@@ -698,7 +698,11 @@ module Stitch
         end
 
         @connection.query_each to_sql, args: args do |rs|
-          yield T.new(rs)
+          {% if T < Tuple %}
+            yield({ {% for type, index in T.type_vars %} rs.read({{type}}) {% if index < T.type_vars.size - 1 %},{% end %} {% end %} })
+          {% else %}
+            yield T.new(rs)
+          {% end %}
         end
       end
 

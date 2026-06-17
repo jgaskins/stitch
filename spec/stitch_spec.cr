@@ -272,6 +272,20 @@ describe Stitch do
           .to_a
         results.should eq [{comment, post}]
       end
+
+      it "supports set operations preserving the projected result type" do
+        post = PostQuery.new.create("Post", "body")
+        alice = CommentQuery.new.create(post.id, "Alice comment", "Alice")
+        bob = CommentQuery.new.create(post.id, "Bob comment", "Bob")
+
+        from_alice = CommentQuery.new.by_author("Alice").include_post
+        from_bob = CommentQuery.new.by_author("Bob").include_post
+
+        results = (from_alice | from_bob).to_a
+        results.size.should eq 2
+        results.should contain({alice, post})
+        results.should contain({bob, post})
+      end
     end
 
     describe "on_conflict / do_nothing" do
