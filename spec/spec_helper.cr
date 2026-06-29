@@ -188,6 +188,14 @@ struct CommentQuery < Stitch::QueryBuilder(Comment)
     where(author: author)
   end
 
+  def page(page : Int32, per_page : Int32 = 20)
+    offset((page - 1) * per_page).limit(per_page)
+  end
+
+  def ordered_by_id
+    order_by(id: :asc)
+  end
+
   def include_post
     posts = PostQuery.new
     self

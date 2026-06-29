@@ -299,6 +299,29 @@ describe Stitch do
       end
     end
 
+    describe "argument order independence" do
+      it "produces the same results regardless of where/limit/offset call order" do
+        post = PostQuery.new.create("Post", "body")
+        5.times { |i| CommentQuery.new.create(post.id, "Comment #{i}", "Author") }
+
+        where_first = CommentQuery.new.for_post(post.id).ordered_by_id.page(1, per_page: 2).to_a
+        where_last = CommentQuery.new.ordered_by_id.page(1, per_page: 2).for_post(post.id).to_a
+
+        where_first.size.should eq 2
+        where_last.size.should eq 2
+        where_first.map(&.id).should eq where_last.map(&.id)
+      end
+
+      it "generates the same SQL regardless of call order" do
+        post_id = 1_i64
+
+        where_first = CommentQuery.new.for_post(post_id).page(1, per_page: 2)
+        where_last = CommentQuery.new.page(1, per_page: 2).for_post(post_id)
+
+        where_first.to_sql.should eq where_last.to_sql
+      end
+    end
+
     describe "to_sql" do
       it "generates correct SELECT SQL" do
         sql = PostQuery.new.to_sql
